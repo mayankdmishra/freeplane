@@ -71,6 +71,12 @@ class NoteBuilder implements IElementContentHandler {
 					note.setContentType(ContentSyntax.specificType(element.getAttribute(
 							NodeTextBuilder.XML_RICHCONTENT_CONTENT_TYPE_ATTRIBUTE, ContentSyntax.XML.prefix)));
 				}
+				final String trashedFromNodeId = element.getAttribute("TRASHED_FROM", null);
+				if (trashedFromNodeId != null)
+					note.setTrashedFromNodeId(trashedFromNodeId);
+				final String trashedFromNodeIndex = element.getAttribute("TRASHED_FROM_INDEX", null);
+				if (trashedFromNodeIndex != null)
+					note.setTrashedFromNodeIndex(Integer.parseInt(trashedFromNodeIndex));
 				nodeModel.putExtension(note);
 			}
 		}

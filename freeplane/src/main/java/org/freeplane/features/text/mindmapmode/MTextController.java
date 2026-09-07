@@ -96,6 +96,7 @@ import org.freeplane.features.map.MapController;
 import org.freeplane.features.map.MapModel;
 import org.freeplane.features.map.NodeChangeEvent;
 import org.freeplane.features.map.NodeModel;
+import org.freeplane.features.note.NoteModel;
 import org.freeplane.features.map.mindmapmode.MMapController;
 import org.freeplane.features.mode.Controller;
 import org.freeplane.features.mode.ModeController;
@@ -558,6 +559,8 @@ public class MTextController extends TextController {
 	}
 
 	public void setNodeObject(final NodeModel node, final Object newObject) {
+		if (NoteModel.isInTrash(node))
+			return;
 		if (newObject == null) {
 			setNodeObject(node, "");
 			return;

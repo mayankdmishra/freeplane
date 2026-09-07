@@ -24,12 +24,10 @@ import java.awt.event.ActionEvent;
 import javax.swing.JOptionPane;
 
 import org.freeplane.core.ui.AFreeplaneAction;
-import org.freeplane.core.ui.components.OptionalDontShowMeAgainDialog;
-import org.freeplane.core.ui.components.OptionalDontShowMeAgainDialog.MessageType;
 import org.freeplane.features.map.NodeModel;
 import org.freeplane.features.mode.Controller;
 import org.freeplane.features.mode.ModeController;
-import org.freeplane.features.mode.mindmapmode.MModeController;
+import org.freeplane.features.note.NoteModel;
 
 public class DeleteAction extends AFreeplaneAction {
 	public static final String NAME = "DeleteAction";
@@ -45,19 +43,28 @@ public class DeleteAction extends AFreeplaneAction {
 	public void actionPerformed(final ActionEvent e) {
 		final ModeController modeController = Controller.getCurrentModeController();
 		for (final NodeModel node : modeController.getMapController().getSelectedNodes()) {
-			if (node.isRoot()) {
+			if (node.isRoot() || NoteModel.isTrashRoot(node)) {
 				return;
 			}
 		}
 		final Controller controller = Controller.getCurrentController();
-		final int showResult = OptionalDontShowMeAgainDialog.show("really_remove_node",
-		    MModeController.RESOURCES_DELETE_NODES_WITHOUT_QUESTION,
-		    MessageType.ONLY_OK_SELECTION_IS_STORED);
+		final boolean deletingTrash = modeController.getMapController().getSelectedNodes().stream()
+				.anyMatch(NoteModel::isInTrash);
+		final String message = deletingTrash
+				? "Delete the entire selected Trash chain permanently? Individual nodes inside Trash cannot be deleted."
+				: "Move the selected node(s) to Trash?";
+		final String title = deletingTrash ? "Delete trashed node" : "Delete node";
+		final int showResult = JOptionPane.showConfirmDialog(null, message, title,
+				JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
 		if (showResult != JOptionPane.OK_OPTION) {
 			return;
 		}
 		final MMapController mapController = (MMapController) modeController.getMapController();
-		mapController.deleteNodes(controller.getSelection().getSortedSelection(true));
+		if (deletingTrash)
+			mapController.deleteNodes(controller.getSelection().getSortedSelection(true));
+		else
+			for (final NodeModel node : controller.getSelection().getSortedSelection(true))
+				mapController.moveNodeToTrash(node);
 		controller.getMapViewManager().obtainFocusForSelected();
 	}
 }

@@ -58,6 +58,10 @@ class NoteWriter implements IExtensionElementWriter, IAttributeWriter {
 				final XMLElement element = new XMLElement();
 				element.setAttribute(NodeTextBuilder.XML_RICHCONTENT_TYPE_ATTRIBUTE, NodeTextBuilder.XML_RICHCONTENT_TYPE_NOTE);
 				element.setAttribute("TAB", tab.getName());
+				if (note.getTrashedFromNodeId() != null) {
+		    element.setAttribute("TRASHED_FROM", note.getTrashedFromNodeId());
+		    element.setAttribute("TRASHED_FROM_INDEX", Integer.toString(note.getTrashedFromNodeIndex()));
+				}
 				NodeTextBuilder.writeRichContent(writer, node, tab, element);
 			}
 			return;
@@ -65,6 +69,10 @@ class NoteWriter implements IExtensionElementWriter, IAttributeWriter {
 		final XMLElement element = new XMLElement();
 		if(extension instanceof NoteModel){
 		    element.setAttribute(NodeTextBuilder.XML_RICHCONTENT_TYPE_ATTRIBUTE, NodeTextBuilder.XML_RICHCONTENT_TYPE_NOTE);
+		    if (note.getTrashedFromNodeId() != null)
+		        element.setAttribute("TRASHED_FROM", note.getTrashedFromNodeId());
+		    if (note.getTrashedFromNodeIndex() >= 0)
+		        element.setAttribute("TRASHED_FROM_INDEX", Integer.toString(note.getTrashedFromNodeIndex()));
 		}
 		else{
 		    element.setAttribute(NodeTextBuilder.XML_RICHCONTENT_TYPE_ATTRIBUTE, "UNKNOWN");

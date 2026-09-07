@@ -77,6 +77,7 @@ import org.freeplane.features.map.MapModel;
 import org.freeplane.features.map.NodeBuilder;
 import org.freeplane.features.map.NodeDeletionEvent;
 import org.freeplane.features.map.NodeModel;
+import org.freeplane.features.note.NoteModel;
 import org.freeplane.features.map.NodeModel.Side;
 import org.freeplane.features.map.NodeMoveEvent;
 import org.freeplane.features.map.NodeRelativePath;
@@ -397,6 +398,7 @@ public class MMapController extends MapController {
         modeController.addAction(new NewSummaryAction());
         modeController.addAction(new NewFreeNodeAction());
         modeController.addAction(new DeleteAction());
+        modeController.addAction(new RestoreNodeFromTrashAction());
         modeController.addAction(new NodeUpAction());
         modeController.addAction(new NodeDownAction());
         modeController.addAction(new ConvertCloneToIndependentNodeAction());
@@ -407,12 +409,121 @@ public class MMapController extends MapController {
         deleteNodes(Arrays.asList(node));
     }
 
+	public void moveNodeToTrash(NodeModel node) {
+		if (node == null || node.isRoot() || NoteModel.isTrashRoot(node) || NoteModel.isInTrash(node))
+			return;
+		final NodeModel oldParent = node.getParentNode();
+		final int oldIndex = oldParent.getIndex(node);
+		final NoteModel oldMetadata = NoteModel.getNote(node);
+		final String oldTrashedFromNodeId = oldMetadata == null ? null : oldMetadata.getTrashedFromNodeId();
+		final int oldTrashedFromNodeIndex = oldMetadata == null ? -1 : oldMetadata.getTrashedFromNodeIndex();
+		final IActor actor = new IActor() {
+			@Override public void act() { moveNodeToTrashWithoutUndo(node); }
+			@Override public String getDescription() { return "moveNodeToTrash"; }
+			@Override public void undo() {
+				moveNodeToWithoutUndo(node, oldParent, oldIndex);
+				final NoteModel metadata = NoteModel.getNote(node);
+				if (oldMetadata == null) {
+					if (metadata != null) node.removeExtension(NoteModel.class);
+				} else {
+					metadata.setTrashedFromNodeId(oldTrashedFromNodeId);
+					metadata.setTrashedFromNodeIndex(oldTrashedFromNodeIndex);
+				}
+			}
+		};
+		Controller.getCurrentModeController().execute(actor, node.getMap());
+	}
+
+	private void moveNodeToTrashWithoutUndo(NodeModel node) {
+		NodeModel root = node.getMap().getRootNode();
+		NodeModel trash = root.getChildren().stream()
+				.filter(child -> "Trash".equals(child.getText())).findFirst().orElse(null);
+		if (trash == null) {
+			trash = new NodeModel("Trash", node.getMap());
+			insertNodeIntoWithoutUndo(trash, root, root.getChildCount());
+		}
+		NodeModel parent = node.getParentNode();
+		List<String> path = new ArrayList<>();
+		for (NodeModel current = parent; current != null && !current.isRoot(); current = current.getParentNode())
+			path.add(current.getText());
+		Collections.reverse(path);
+		NodeModel trashParent = trash;
+		for (String name : path) {
+			NodeModel next = trashParent.getChildren().stream().filter(child -> name.equals(child.getText()))
+					.findFirst().orElse(null);
+			if (next == null) {
+				next = new NodeModel(name, node.getMap());
+				insertNodeIntoWithoutUndo(next, trashParent, trashParent.getChildCount());
+			}
+			trashParent = next;
+		}
+		NoteModel metadata = NoteModel.getNote(node);
+		if (metadata == null) {
+			metadata = new NoteModel();
+			node.addExtension(metadata);
+		}
+		metadata.setTrashedFromNodeId(parent.getID());
+		metadata.setTrashedFromNodeIndex(parent.getIndex(node));
+		moveNodeToWithoutUndo(node, trashParent, trashParent.getChildCount());
+	}
+
+	public void restoreNodeFromTrash(NodeModel node) {
+		NoteModel metadata = NoteModel.getNote(node);
+		if (metadata == null || metadata.getTrashedFromNodeId() == null || metadata.getTrashedFromNodeIndex() < 0
+				|| !NoteModel.isInTrash(node)) return;
+		NodeModel parent = node.getMap().getNodeForID(metadata.getTrashedFromNodeId());
+		if (parent == null) return;
+		final NodeModel trashParent = node.getParentNode();
+		final int trashIndex = trashParent.getIndex(node);
+		final int index = Math.min(metadata.getTrashedFromNodeIndex(), parent.getChildCount());
+		final String trashedFromNodeId = metadata.getTrashedFromNodeId();
+		final int trashedFromNodeIndex = metadata.getTrashedFromNodeIndex();
+		final IActor actor = new IActor() {
+			@Override public void act() { restoreNodeFromTrashWithoutUndo(node, parent, index); }
+			@Override public String getDescription() { return "restoreNodeFromTrash"; }
+			@Override public void undo() {
+				NoteModel restoredMetadata = NoteModel.getNote(node);
+				if (restoredMetadata == null) {
+					restoredMetadata = new NoteModel();
+					node.addExtension(restoredMetadata);
+				}
+				restoredMetadata.setTrashedFromNodeId(trashedFromNodeId);
+				restoredMetadata.setTrashedFromNodeIndex(trashedFromNodeIndex);
+				moveNodeToWithoutUndo(node, trashParent, trashIndex);
+			}
+		};
+		Controller.getCurrentModeController().execute(actor, node.getMap());
+	}
+
+	private void restoreNodeFromTrashWithoutUndo(NodeModel node, NodeModel parent, int index) {
+		final NoteModel metadata = NoteModel.getNote(node);
+		metadata.setTrashedFromNodeId(null);
+		metadata.setTrashedFromNodeIndex(-1);
+		if (metadata.getText() == null && metadata.getXml() == null && !metadata.hasTabs())
+			node.removeExtension(NoteModel.class);
+		moveNodeToWithoutUndo(node, parent, index);
+	}
+
     public void deleteNodes(final List<NodeModel> nodes) {
-        final List<NodeModel> deletedNodesWithSummaryGroupIndicators = new SummaryGroupEdgeListAdder(nodes).addSummaryEdgeNodes();
+        if (nodes.stream().anyMatch(node -> node == null || node.isRoot() || NoteModel.isTrashRoot(node)))
+            return;
+        final List<NodeModel> deletionRoots = new ArrayList<>();
+        for (NodeModel node : nodes) {
+            final NodeModel deletionRoot = NoteModel.isInTrash(node) ? NoteModel.getTrashChainRoot(node) : node;
+            if (!deletionRoots.contains(deletionRoot))
+                deletionRoots.add(deletionRoot);
+        }
+        final List<NodeModel> deletedNodesWithSummaryGroupIndicators = new SummaryGroupEdgeListAdder(deletionRoots).addSummaryEdgeNodes();
         for(NodeModel node : deletedNodesWithSummaryGroupIndicators){
             deleteSingleNodeWithClones(node);
         }
     }
+
+	/** Used when a restored note item must be removed from Trash individually. */
+	public void deleteNodeFromTrash(NodeModel node) {
+		if (node != null && NoteModel.isInTrash(node) && !NoteModel.isTrashRoot(node))
+			deleteSingleNodeWithClones(node);
+	}
 
     public void convertClonesToIndependentNodes(final NodeModel node){
         final MLinkController linkController = (MLinkController) MLinkController.getController();
@@ -558,6 +669,8 @@ public class MMapController extends MapController {
     }
 
     public boolean isWriteable(final NodeModel targetNode) {
+		if (NoteModel.isInTrash(targetNode))
+			return false;
         final EncryptionModel encryptionModel = EncryptionModel.getModel(targetNode);
         if (encryptionModel != null) {
             return encryptionModel.isAccessible();
@@ -570,6 +683,8 @@ public class MMapController extends MapController {
     }
 
     public void moveNodes(final List<NodeModel> movedNodes, final NodeModel newParent, final int newIndex) {
+		if (!isWriteable(newParent) || movedNodes.stream().anyMatch(node -> NoteModel.isInTrash(node) || NoteModel.isTrashRoot(node)))
+			return;
         moveNodes(movedNodes, newParent, newIndex, DEFAULT_OPERATION_ERROR_HANDLER);
     }
 

@@ -24,6 +24,7 @@ import java.awt.ComponentOrientation;
 import java.awt.Font;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import javax.swing.Icon;
@@ -48,6 +49,7 @@ import org.freeplane.features.map.MapController;
 import org.freeplane.features.map.MapModel;
 import org.freeplane.features.map.NodeChangeEvent;
 import org.freeplane.features.map.NodeModel;
+import org.freeplane.features.map.mindmapmode.MMapController;
 import org.freeplane.features.mode.Controller;
 import org.freeplane.features.mode.ModeController;
 import org.freeplane.features.nodestyle.NodeStyleController;
@@ -60,9 +62,10 @@ import org.freeplane.main.application.ApplicationResourceController;
 import com.lightdev.app.shtm.SHTMLEditorPane;
 
 class NoteManager implements INodeSelectionListener, IMapSelectionListener, IMapLifeCycleListener {
-	private static final class NodeLinkTarget {
-		private final NodeModel node;
-		private final String path;
+	static final String NOTE_TRASH_NAME = "Trash";
+	static final class NodeLinkTarget {
+		final NodeModel node;
+		final String path;
 
 		private NodeLinkTarget(NodeModel node, String path) {
 			this.node = node;
@@ -190,11 +193,15 @@ class NoteManager implements INodeSelectionListener, IMapSelectionListener, IMap
             return;
         }
 		final NoteModel noteModel = this.node != null ? NoteModel.getNote(this.node) : null;
-		if (noteModel != null && noteModel.getTab(selectedTabName) == null)
+		if (noteModel != null && noteModel.getTab(selectedTabName) == null) {
 			selectedTabName = NoteModel.DEFAULT_TAB_NAME;
+			if (noteModel.getTab(selectedTabName) == null)
+				selectedTabName = NoteModel.LEGACY_DEFAULT_TAB_NAME;
+		}
 		final NoteModel.Tab selectedTab = noteModel != null ? noteModel.getTab(selectedTabName) : null;
 		final String note = selectedTab != null ? selectedTab.getText() : null;
 		notePanel.setTabs(noteModel == null ? java.util.Collections.emptyList() : noteModel.getTabs(), selectedTabName);
+		notePanel.setReadOnly(NoteModel.isInTrash(node));
 		if (note != null) {
 			try {
 			    TextController textController = TextController.getController();
@@ -204,7 +211,7 @@ class NoteManager implements INodeSelectionListener, IMapSelectionListener, IMap
 					notePanel.setViewedImage(icon, noteStyleAccessor.getHorizontalAlignment(), noteBackground);
 				else if (transformedContent == note) {
 					notePanel.removeDocumentListener();
-					String noteContentType = noteController.getNoteContentType(node);
+					String noteContentType = selectedTab.getContentType();
 					String editedContent = TextController.isHtmlContentType(noteContentType) ? HtmlUtils.textToHTML(note) : note;
 					notePanel.setEditedContent(editedContent, bodyCssRule, noteStyleSheet, noteForeground, noteBackground);
 					SwingUtilities.invokeLater(new Runnable() {
@@ -265,6 +272,10 @@ class NoteManager implements INodeSelectionListener, IMapSelectionListener, IMap
 
 	NodeModel getNode() {
 		return node;
+	}
+
+	boolean isTrashNode() {
+		return NoteModel.isInTrash(node);
 	}
 
     void restoreStartupNote() {
@@ -420,7 +431,7 @@ class NoteManager implements INodeSelectionListener, IMapSelectionListener, IMap
 	}
 
 	void addTab() {
-		if (node == null) return;
+		if (node == null || NoteModel.isInTrash(node)) return;
 		saveNote();
 		NoteModel note = NoteModel.getNote(node);
 		NoteModel updated = note == null ? new NoteModel() : note.copy();
@@ -435,11 +446,14 @@ class NoteManager implements INodeSelectionListener, IMapSelectionListener, IMap
 	}
 
 	void renameTab(String oldName, String newName) {
-		if (node == null || newName == null || newName.trim().isEmpty()) return;
+		if (node == null || NoteModel.isInTrash(node) || newName == null || newName.trim().isEmpty()) return;
 		newName = newName.trim();
 		NoteModel note = NoteModel.getNote(node);
 		if (note == null || note.getTab(newName) != null) return;
 		NoteModel updated = note.copy();
+		// Convert a legacy single note only when the user explicitly renames it.
+		// Opening and viewing an old map therefore leaves its original note format untouched.
+		updated.ensureTabs();
 		NoteModel.Tab tab = updated.getTab(oldName);
 		if (tab == null) return;
 		tab.setName(newName);
@@ -449,10 +463,17 @@ class NoteManager implements INodeSelectionListener, IMapSelectionListener, IMap
 	}
 
 	void closeTab(String tabName) {
-		if (node == null) return;
+		if (node == null || NoteModel.isInTrash(node)) return;
 		saveNote();
 		NoteModel note = NoteModel.getNote(node);
 		if (note == null) return;
+		NoteModel.Tab tabToTrash = note.getTab(tabName);
+		if (tabToTrash == null) return;
+		int answer = JOptionPane.showConfirmDialog(noteController.getNotePanel(),
+				"Move note tab \"" + tabName + "\" to Trash?", "Close note tab",
+				JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+		if (answer != JOptionPane.YES_OPTION) return;
+		trashTab(tabName, tabToTrash);
 		NoteModel updated = note.copy();
 		updated.ensureTabs();
 		updated.removeTab(tabName);
@@ -461,10 +482,77 @@ class NoteManager implements INodeSelectionListener, IMapSelectionListener, IMap
 		updateEditor();
 	}
 
+	private void trashTab(String tabName, NoteModel.Tab tab) {
+		final MMapController mapController = (MMapController) noteController.getModeController().getMapController();
+		NodeModel trash = null;
+		NodeModel root = node.getMap().getRootNode();
+		for (NodeModel child : root.getChildren()) {
+			if (NOTE_TRASH_NAME.equals(child.getText())) {
+				trash = child;
+				break;
+			}
+		}
+		if (trash == null) {
+			trash = new NodeModel(NOTE_TRASH_NAME, node.getMap());
+			mapController.insertNode(trash, root);
+		}
+		NodeModel parentTrash = findOrCreateTrashPath(trash, node);
+		NodeModel trashedNote = new NodeModel(tabName, node.getMap());
+		NoteModel trashedModel = new NoteModel(tab.getContentType(), tab.getText(), tab.getXml());
+		trashedModel.setTrashedFromNodeId(node.getID());
+		trashedNote.addExtension(trashedModel);
+		mapController.insertNode(trashedNote, parentTrash);
+	}
+
+	private NodeModel findOrCreateTrashPath(NodeModel trash, NodeModel source) {
+		List<String> path = new ArrayList<>();
+		for (NodeModel current = source; current != null && !current.isRoot(); current = current.getParentNode())
+			path.add(current.getText());
+		Collections.reverse(path);
+		NodeModel current = trash;
+		for (String name : path) {
+			NodeModel next = null;
+			for (NodeModel child : current.getChildren()) {
+				if (name.equals(child.getText())) {
+					next = child;
+					break;
+				}
+			}
+			if (next == null) {
+				next = new NodeModel(name, source.getMap());
+				((MMapController) noteController.getModeController().getMapController()).insertNode(next, current);
+			}
+			current = next;
+		}
+		return current;
+	}
+
+	void restoreTrashedNote(NodeModel trashedNode) {
+		NoteModel trashedModel = NoteModel.getNote(trashedNode);
+		if (trashedModel == null || trashedModel.getTrashedFromNodeId() == null) return;
+		if (trashedModel.getTrashedFromNodeIndex() >= 0) {
+			((MMapController) noteController.getModeController().getMapController()).restoreNodeFromTrash(trashedNode);
+			return;
+		}
+		NodeModel target = trashedNode.getMap().getNodeForID(trashedModel.getTrashedFromNodeId());
+		if (target == null) return;
+		NoteModel original = NoteModel.getNote(target);
+		NoteModel updated = original == null ? new NoteModel() : original.copy();
+		updated.ensureTabs();
+		String tabName = trashedNode.getText();
+		if (updated.getTab(tabName) != null) tabName = "restored-" + tabName;
+		NoteModel.Tab tab = updated.addTab(tabName);
+		tab.setContentType(trashedModel.getContentType());
+		tab.setText(trashedModel.getText());
+		noteController.setNoteTabs(target, updated, "restoreNoteTab");
+		((MMapController) noteController.getModeController().getMapController()).deleteNodeFromTrash(trashedNode);
+	}
+
 	void insertLink(SHTMLEditorPane editorPane, boolean linkToNoteTab) {
 		if (node == null || editorPane.getSelectionStart() == editorPane.getSelectionEnd()) return;
 		List<NodeLinkTarget> nodes = new ArrayList<>();
 		collectNodes(node.getMap().getRootNode(), "", nodes);
+		if (nodes.isEmpty()) return;
 		NodeLinkTarget selectedTarget = (NodeLinkTarget) JOptionPane.showInputDialog(noteController.getNotePanel(),
 				"Link selected text to", "Insert note link", JOptionPane.PLAIN_MESSAGE, null,
 				nodes.toArray(), nodes.get(0));
@@ -486,11 +574,40 @@ class NoteManager implements INodeSelectionListener, IMapSelectionListener, IMap
 		editorPane.setLink(null, href, null);
 	}
 
+	List<NodeLinkTarget> getLinkTargets() {
+		List<NodeLinkTarget> nodes = new ArrayList<>();
+		collectNodes(node.getMap().getRootNode(), "", nodes);
+		return nodes;
+	}
+
+	void insertNodeLink(SHTMLEditorPane editorPane, NodeModel target) {
+		editorPane.setLink(null, "#" + target.getID(), null);
+	}
+
+	void insertNoteLink(SHTMLEditorPane editorPane, NodeModel target, String tabName) {
+		editorPane.setLink(null, "note:#" + target.getID() + "/" + tabName, null);
+	}
+
+	List<String> getTabNames(NodeModel target) {
+		NoteModel targetNote = NoteModel.getNote(target);
+		List<String> destinations = new ArrayList<>();
+		if (targetNote == null || !targetNote.hasTabs())
+			destinations.add(NoteModel.DEFAULT_TAB_NAME);
+		else
+			for (NoteModel.Tab tab : targetNote.getTabs())
+				destinations.add(tab.getName());
+		return destinations;
+	}
+
 	void removeLink(SHTMLEditorPane editorPane) {
 		editorPane.setLink(null, null, null);
 	}
 
 	private void collectNodes(NodeModel current, String path, List<NodeLinkTarget> nodes) {
+		NodeModel trash = current.getMap().getRootNode().getChildren().stream()
+				.filter(child -> "Trash".equals(child.getText())).findFirst().orElse(null);
+		for (NodeModel ancestor = current; ancestor != null; ancestor = ancestor.getParentNode())
+			if (ancestor == trash) return;
 		nodes.add(new NodeLinkTarget(current, path));
 		for (NodeModel child : current.getChildren()) collectNodes(child, path + "  ", nodes);
 	}

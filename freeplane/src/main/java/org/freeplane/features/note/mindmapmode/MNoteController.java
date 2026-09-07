@@ -367,10 +367,13 @@ public class MNoteController extends NoteController {
 	}
 
 	public void editNoteInDialog(final NodeModel nodeModel) {
+		if (NoteModel.isInTrash(nodeModel))
+			return;
 		new NoteDialogStarter().editNoteInDialog(nodeModel);
 	}
 
 	NotePanel getNotePanel() {
 		return notePanel;
 	}
+
 }

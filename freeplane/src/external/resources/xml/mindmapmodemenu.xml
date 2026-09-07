@@ -179,7 +179,6 @@
 				<Entry name="notes">
 					<Entry name="SelectNoteAction" accelerator="control LESS" />
 					<Entry name="EditNoteInDialogAction" />
-					<Entry name="RemoveNoteAction" />
 				</Entry>
 				<Entry builder="separator" />
 				<Entry name="CutAction" accelerator="control X" />
@@ -728,6 +727,7 @@
 		<Entry name="JumpOutAction"  accelerator="control ESCAPE"/>
 	</Entry>
 	<Entry name="node_popup" builder="node_popup">
+				<Entry name="RestoreNodeFromTrashAction" usedBy="EDITOR" />
 				<Entry usedBy = "EDITOR" >
 			<Entry name="CutAction" accelerator="control X" usedBy = "EDITOR" />
 		</Entry>
@@ -743,7 +743,6 @@
 						<Entry name="menu_remove">
 							<Entry name="DeleteAction" />
 						<Entry name="DeleteDetailsAction" />
-								<Entry name="RemoveNoteAction" />
 								<Entry name="attributes_RemoveAllAttributesAction" />
 						</Entry>
 			<Entry name="edit">

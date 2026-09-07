@@ -32,7 +32,8 @@ import org.freeplane.features.text.RichTextModel;
  */
 public class NoteModel extends RichTextModel implements IExtension {
 	public static final String EDITING_PURPOSE = "Note";
-	public static final String DEFAULT_TAB_NAME = "note1";
+	public static final String DEFAULT_TAB_NAME = "Main";
+	public static final String LEGACY_DEFAULT_TAB_NAME = "note1";
 
 	public static class Tab extends RichTextModel {
 		private String name;
@@ -52,6 +53,13 @@ public class NoteModel extends RichTextModel implements IExtension {
 	}
 
 	private List<Tab> tabs;
+	private String trashedFromNodeId;
+	private int trashedFromNodeIndex = -1;
+
+	public String getTrashedFromNodeId() { return trashedFromNodeId; }
+	public void setTrashedFromNodeId(String nodeId) { trashedFromNodeId = nodeId; }
+	public int getTrashedFromNodeIndex() { return trashedFromNodeIndex; }
+	public void setTrashedFromNodeIndex(int index) { trashedFromNodeIndex = index; }
 
 	public static NoteModel createNote(final NodeModel node) {
 		NoteModel note = NoteModel.getNote(node);
@@ -72,6 +80,37 @@ public class NoteModel extends RichTextModel implements IExtension {
 		return extension != null ? extension.getText() : null;
 	}
 
+	public static boolean isInTrash(final NodeModel node) {
+		if (node == null || node.getMap() == null) return false;
+		final NodeModel trash = node.getMap().getRootNode();
+		NodeModel current = node;
+		while (current != null && current != trash) {
+			if ("Trash".equals(current.getText()) && current.getParentNode() == trash)
+				return true;
+			current = current.getParentNode();
+		}
+		return false;
+	}
+
+	public static boolean isTrashRoot(final NodeModel node) {
+		return node != null && node.getParentNode() != null
+				&& node.getParentNode().isRoot() && "Trash".equals(node.getText());
+	}
+
+	/**
+	 * Returns the complete branch below the Trash node which contains the
+	 * supplied node. Trash branches are deleted as a whole, never leaf by leaf.
+	 */
+	public static NodeModel getTrashChainRoot(final NodeModel node) {
+		if (!isInTrash(node) || isTrashRoot(node)) return node;
+		final NodeModel trash = node.getMap().getRootNode().getChildren().stream()
+				.filter(NoteModel::isTrashRoot).findFirst().orElse(null);
+		NodeModel chainRoot = node;
+		while (chainRoot.getParentNode() != null && chainRoot.getParentNode() != trash)
+			chainRoot = chainRoot.getParentNode();
+		return chainRoot;
+	}
+
     public static String getNoteContentType(final NodeModel node) {
         final NoteModel extension = NoteModel.getNote(node);
         return extension != null ? extension.getContentType() : null;
@@ -85,7 +124,11 @@ public class NoteModel extends RichTextModel implements IExtension {
     }
 
 	public List<Tab> getTabs() {
-		return tabs == null ? Collections.emptyList() : Collections.unmodifiableList(tabs);
+		if (tabs == null)
+			return getText() == null && getXml() == null
+					? Collections.emptyList()
+					: Collections.singletonList(new Tab(DEFAULT_TAB_NAME, super.getContentType(), super.getText(), super.getXml()));
+		return Collections.unmodifiableList(tabs);
 	}
 
 	public boolean hasTabs() { return tabs != null; }
@@ -139,6 +182,8 @@ public class NoteModel extends RichTextModel implements IExtension {
     
     public NoteModel copy() {
 		NoteModel copy = new NoteModel(getContentType(), getText(), getXml());
+		copy.trashedFromNodeId = trashedFromNodeId;
+		copy.trashedFromNodeIndex = trashedFromNodeIndex;
 		if (tabs != null) {
 			copy.tabs = new ArrayList<>();
 			for (Tab tab : tabs) copy.tabs.add(tab.copy());

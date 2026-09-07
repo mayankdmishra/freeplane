@@ -44,6 +44,8 @@ import javax.swing.text.Document;
 import javax.swing.text.JTextComponent;
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.StyleSheet;
+import javax.swing.event.MenuEvent;
+import javax.swing.event.MenuListener;
 
 import org.freeplane.api.HorizontalTextAlignment;
 import org.freeplane.core.resources.ResourceController;
@@ -113,9 +115,17 @@ class NotePanel extends JPanel {
 				if (index < 0) return;
 				tabs.setSelectedIndex(index);
 				JPopupMenu menu = new JPopupMenu();
-				JMenuItem rename = new JMenuItem("Rename tab");
-				rename.addActionListener(event -> renameSelectedTab());
-				menu.add(rename);
+				if (!noteManager.isTrashNode()) {
+					JMenuItem rename = new JMenuItem("Rename");
+					rename.addActionListener(event -> renameSelectedTab());
+					menu.add(rename);
+				}
+				else if (NoteModel.getNote(noteManager.getNode()) != null
+						&& NoteModel.getNote(noteManager.getNode()).getTrashedFromNodeId() != null) {
+					JMenuItem restore = new JMenuItem("Restore");
+					restore.addActionListener(event -> noteManager.restoreTrashedNote(noteManager.getNode()));
+					menu.add(restore);
+				}
 				menu.show(tabs, e.getX(), e.getY());
 			}
 		});
@@ -126,9 +136,8 @@ class NotePanel extends JPanel {
 				renameSelectedTab();
 			}
 		});
-		JPanel tabBar = new JPanel(new BorderLayout());
-		tabBar.add(tabs, BorderLayout.CENTER);
-		add(tabBar, BorderLayout.NORTH);
+		tabs.setTabLayoutPolicy(JTabbedPane.SCROLL_TAB_LAYOUT);
+		add(tabs, BorderLayout.NORTH);
 		add(contentPanel, BorderLayout.CENTER);
 		this.htmlEditorPanel = createHtmlEditorComponent(noteManager);
 		this.ownStyleSheet = StyleSheetConfigurer.createDefaultStyleSheet();
@@ -174,18 +183,24 @@ class NotePanel extends JPanel {
 		if (newName != null) noteManager.renameTab(oldName, newName);
 	}
 
+	void setReadOnly(boolean readOnly) {
+		htmlEditorPanel.getEditorPane().setEditable(!readOnly);
+	}
+
 	void setTabs(java.util.List<NoteModel.Tab> noteTabs, String selectedTabName) {
 		updatingTabs = true;
 		try {
 			tabs.removeAll();
+			boolean readOnly = noteManager.isTrashNode();
 			if (noteTabs.isEmpty()) {
-				addClosableTab(NoteModel.DEFAULT_TAB_NAME);
+				addClosableTab(NoteModel.DEFAULT_TAB_NAME, readOnly);
 			}
 			else {
 				for (NoteModel.Tab tab : noteTabs)
-					addClosableTab(tab.getName());
+					addClosableTab(tab.getName(), readOnly);
 			}
-			addAddTab();
+			if (!readOnly)
+				addAddTab();
 			for (int i = 0; i < tabs.getTabCount(); i++) {
 				if (tabs.getTitleAt(i).equals(selectedTabName)) {
 					tabs.setSelectedIndex(i);
@@ -198,12 +213,13 @@ class NotePanel extends JPanel {
 		}
 	}
 
-	private void addClosableTab(String title) {
+	private void addClosableTab(String title, boolean readOnly) {
 		int index = tabs.getTabCount();
 		tabs.addTab(title, new JPanel());
 		JPanel header = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 0));
 		header.setOpaque(false);
 		header.add(new JLabel(title));
+		if (readOnly) return;
 		JButton close = new JButton("×");
 		close.setBorderPainted(false);
 		close.setContentAreaFilled(false);
@@ -323,10 +339,8 @@ class NotePanel extends JPanel {
 
 	private void addLinkMenu(SHTMLEditorPane editorPane) {
 		JMenu linkTo = new JMenu("Link to");
-		JMenuItem node = new JMenuItem("Node");
-		node.addActionListener(e -> noteManager.insertLink(editorPane, false));
-		JMenuItem note = new JMenuItem("Note tab");
-		note.addActionListener(e -> noteManager.insertLink(editorPane, true));
+		JMenu node = createNodeLinkMenu(editorPane);
+		JMenu note = createNoteLinkMenu(editorPane);
 		linkTo.add(node);
 		linkTo.add(note);
 		JMenuItem removeLink = new JMenuItem("Remove link");
@@ -334,6 +348,44 @@ class NotePanel extends JPanel {
 		editorPane.getPopup().addSeparator();
 		editorPane.getPopup().add(linkTo);
 		editorPane.getPopup().add(removeLink);
+	}
+
+	private JMenu createNodeLinkMenu(SHTMLEditorPane editorPane) {
+		JMenu nodeMenu = new JMenu("Node");
+		nodeMenu.addMenuListener(populateMenu(nodeMenu, editorPane, false));
+		return nodeMenu;
+	}
+
+	private JMenu createNoteLinkMenu(SHTMLEditorPane editorPane) {
+		JMenu noteMenu = new JMenu("Note");
+		noteMenu.addMenuListener(populateMenu(noteMenu, editorPane, true));
+		return noteMenu;
+	}
+
+	private MenuListener populateMenu(JMenu menu, SHTMLEditorPane editorPane, boolean noteLinks) {
+		return new MenuListener() {
+			@Override public void menuSelected(MenuEvent event) {
+				menu.removeAll();
+				for (NoteManager.NodeLinkTarget target : noteManager.getLinkTargets()) {
+					if (!noteLinks) {
+						JMenuItem item = new JMenuItem(target.toString());
+						item.addActionListener(e -> noteManager.insertNodeLink(editorPane, target.node));
+						menu.add(item);
+					}
+					else {
+						JMenu targetMenu = new JMenu(target.toString());
+						for (String tabName : noteManager.getTabNames(target.node)) {
+							JMenuItem item = new JMenuItem(tabName);
+							item.addActionListener(e -> noteManager.insertNoteLink(editorPane, target.node, tabName));
+							targetMenu.add(item);
+						}
+						menu.add(targetMenu);
+					}
+				}
+			}
+			@Override public void menuDeselected(MenuEvent event) { }
+			@Override public void menuCanceled(MenuEvent event) { }
+		};
 	}
 
 
@@ -534,6 +586,8 @@ class NotePanel extends JPanel {
 	}
 
 	void editNote() {
+		if (noteManager.isTrashNode())
+			return;
 	       if (htmlEditorPanel.isVisible()) {
 	           requestFocusInEditorPane();
 	           return;
