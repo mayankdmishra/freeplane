@@ -620,10 +620,23 @@ class NoteManager implements INodeSelectionListener, IMapSelectionListener, IMap
 		NodeModel target = node == null ? null : node.getMap().getNodeForID(nodeId);
 		if (target == null) return false;
 		saveNote();
+		// Stop the old editor before changing the displayed note. Otherwise its
+		// focus-lost callback can run after navigation and refresh the panel with
+		// the old node/tab contents.
+		NotePanel notePanel = noteController.getNotePanel();
+		if (notePanel != null) {
+			notePanel.removeDocumentListener();
+			notePanel.stopEditing();
+		}
 		selectedTabName = tabName;
-		Controller.getCurrentModeController().getMapController().select(target);
-		node = target;
-		updateEditor();
+		if (noteFollowsSelection && target != node) {
+			Controller.getCurrentModeController().getMapController().select(target);
+		}
+		else {
+			node = target;
+			updateEditor();
+			Controller.getCurrentModeController().getMapController().select(target);
+		}
 		return true;
 	}
 }

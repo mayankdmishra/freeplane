@@ -61,7 +61,7 @@ public class LinkOpener extends MouseAdapter implements MouseMotionListener{
 
     @Override
 	public void mouseClicked(final MouseEvent ev) {
-    	if (Compat.isPlainEvent(ev)) {
+	    if (Compat.isCtrlEvent(ev) || Compat.isPlainEvent(ev)) {
     		JTextComponent textComponent = (JTextComponent) ev.getComponent();
     		final Document document = textComponent.getDocument();
         	if(!(document instanceof HTMLDocument) || nodeSupplier.get() == null)

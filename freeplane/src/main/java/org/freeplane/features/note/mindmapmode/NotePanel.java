@@ -73,6 +73,8 @@ class NotePanel extends JPanel {
 
     private static final String CONTENT_TYPE_TEXT_HTML = "text/html";
 
+    private static final int NOTE_LINK_MENU_DELAY_MS = 500;
+
     final static Pattern HEAD = Pattern.compile("<head>.*</head>\n", Pattern.DOTALL);
 
 	private static final long serialVersionUID = 1L;
@@ -352,12 +354,14 @@ class NotePanel extends JPanel {
 
 	private JMenu createNodeLinkMenu(SHTMLEditorPane editorPane) {
 		JMenu nodeMenu = new JMenu("Node");
+		nodeMenu.setDelay(NOTE_LINK_MENU_DELAY_MS);
 		nodeMenu.addMenuListener(populateMenu(nodeMenu, editorPane, false));
 		return nodeMenu;
 	}
 
 	private JMenu createNoteLinkMenu(SHTMLEditorPane editorPane) {
 		JMenu noteMenu = new JMenu("Note");
+		noteMenu.setDelay(NOTE_LINK_MENU_DELAY_MS);
 		noteMenu.addMenuListener(populateMenu(noteMenu, editorPane, true));
 		return noteMenu;
 	}
@@ -374,6 +378,7 @@ class NotePanel extends JPanel {
 					}
 					else {
 						JMenu targetMenu = new JMenu(target.toString());
+						targetMenu.setDelay(NOTE_LINK_MENU_DELAY_MS);
 						for (String tabName : noteManager.getTabNames(target.node)) {
 							JMenuItem item = new JMenuItem(tabName);
 							item.addActionListener(e -> noteManager.insertNoteLink(editorPane, target.node, tabName));
